@@ -64,8 +64,28 @@ then
     # Mise en place de la structure de la base et des données permettant son fonctionnement avec l'application
 
     echo "Création de la structure de la base..."
-    export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/taxhubdb.sql  &> $LOG_DIR/installdb/install_db.log
-    export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/generic_drop_and_restore_deps_views.sql  &> $LOG_DIR/installdb/install_db.log
+    export FLASK_APP=server:app
+    # stop just before creation of usershub schema
+    flask db upgrade taxonomie@35c86c469aa1 -x atlas=$insert_geonatureatlas_data -x attribut-example=$insert_attribut_example -x taxons-example=$insert_taxons_example || exit 1
+
+    if [ $users_schema = "foreign" ]
+    then
+        echo "Connexion à la base Utilisateur..."
+        cp data/create_fdw_utilisateurs.sql /tmp/taxhub/create_fdw_utilisateurs.sql
+        cp data/grant.sql /tmp/taxhub/grant.sql
+        sed -i "s#\$user_pg#$user_pg#g" /tmp/taxhub/create_fdw_utilisateurs.sql
+        sed -i "s#\$usershub_host#$usershub_host#g" /tmp/taxhub/create_fdw_utilisateurs.sql
+        sed -i "s#\$usershub_db#$usershub_db#g" /tmp/taxhub/create_fdw_utilisateurs.sql
+        sed -i "s#\$usershub_port#$usershub_port#g" /tmp/taxhub/create_fdw_utilisateurs.sql
+        sed -i "s#\$usershub_user#$usershub_user#g" /tmp/taxhub/create_fdw_utilisateurs.sql
+        sed -i "s#\$usershub_pass#$usershub_pass#g" /tmp/taxhub/create_fdw_utilisateurs.sql
+        sed -i "s#\$usershub_user#$usershub_user#g" /tmp/taxhub/grant.sql
+        sudo -u postgres -s psql -d $db_name -f /tmp/taxhub/create_fdw_utilisateurs.sql  &>> $LOG_DIR/installdb/install_db.log
+        sudo -u postgres -s psql -d $db_name -f /tmp/taxhub/grant.sql  &>> $LOG_DIR/installdb/install_db.log
+        flask db stamp taxonomie@c59c225e1c42 || exit 1  # falsely apply c59c225e1c42 (creation of usershub schema)
+    fi
+    # on a besoin du role n°9 inséré par les données d’exemple de usershub
+    flask db upgrade taxonomie@head -x usershub-sample-data=true || exit 1  # apply subsequent migrations || exit 1
 
     echo "Décompression des fichiers du taxref..."
 
@@ -85,57 +105,8 @@ then
     cd $DIR
     sudo -u postgres -s psql -d $db_name  -f data/inpn/data_inpn_taxhub.sql &>> $LOG_DIR/installdb/install_db.log
 
-    echo "Création de la vue représentant la hierarchie taxonomique..."
-    export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/materialized_views.sql  &>> $LOG_DIR/installdb/install_db.log
-
-    echo "Insertion de données de base"
-    export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/taxhubdata.sql  &>> $LOG_DIR/installdb/install_db.log
-
-    echo "Insertion de fonctions génériques de détection de vues dépendantes"
-    export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/generic_drop_and_restore_deps_views.sql  &>> $LOG_DIR/installdb/install_db.log
-
-    if $insert_geonatureatlas_data
-    then
-        echo "Insertion de données nécessaires à GeoNature-atlas"
-        export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/taxhubdata_atlas.sql  &>> $LOG_DIR/installdb/install_db.log
-    fi
-
-	if $insert_attribut_example
-    then
-        echo "Insertion d'un exemple d'attribut"
-        export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/taxhubdata_example.sql  &>> $LOG_DIR/installdb/install_db.log
-    fi
-
-	if $insert_taxons_example
-    then
-        echo "Insertion de 8 taxons exemple"
-        export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/taxhubdata_taxons_example.sql  &>> $LOG_DIR/installdb/install_db.log
-    fi
-
-    if [ $users_schema = "local" ]
-    then
-        echo "Création du schéma Utilisateur..."
-        wget https://raw.githubusercontent.com/PnX-SI/UsersHub/$usershub_release/data/usershub.sql -P /tmp
-        wget https://raw.githubusercontent.com/PnX-SI/UsersHub/$usershub_release/data/usershub-data.sql -P /tmp
-        wget https://raw.githubusercontent.com/PnX-SI/UsersHub/$usershub_release/data/usershub-dataset.sql -P /tmp
-        export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f /tmp/usershub.sql &>> $LOG_DIR/installdb/install_db.log
-        export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f /tmp/usershub-data.sql &>> $LOG_DIR/installdb/install_db.log
-        export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f /tmp/usershub-dataset.sql &>> $LOG_DIR/installdb/install_db.log
-        export PGPASSWORD=$user_pg_pass;psql -h $db_host -U $user_pg -d $db_name -f data/adds_for_usershub.sql &>> $LOG_DIR/installdb/install_db.log
-    else
-        echo "Connexion à la base Utilisateur..."
-        cp data/create_fdw_utilisateurs.sql /tmp/taxhub/create_fdw_utilisateurs.sql
-        cp data/grant.sql /tmp/taxhub/grant.sql
-        sed -i "s#\$user_pg#$user_pg#g" /tmp/taxhub/create_fdw_utilisateurs.sql
-        sed -i "s#\$usershub_host#$usershub_host#g" /tmp/taxhub/create_fdw_utilisateurs.sql
-        sed -i "s#\$usershub_db#$usershub_db#g" /tmp/taxhub/create_fdw_utilisateurs.sql
-        sed -i "s#\$usershub_port#$usershub_port#g" /tmp/taxhub/create_fdw_utilisateurs.sql
-        sed -i "s#\$usershub_user#$usershub_user#g" /tmp/taxhub/create_fdw_utilisateurs.sql
-        sed -i "s#\$usershub_pass#$usershub_pass#g" /tmp/taxhub/create_fdw_utilisateurs.sql
-        sed -i "s#\$usershub_user#$usershub_user#g" /tmp/taxhub/grant.sql
-        sudo -u postgres -s psql -d $db_name -f /tmp/taxhub/create_fdw_utilisateurs.sql  &>> $LOG_DIR/installdb/install_db.log
-        sudo -u postgres -s psql -d $db_name -f /tmp/taxhub/grant.sql  &>> $LOG_DIR/installdb/install_db.log
-    fi
+    echo "Regénération des vues matérialisées..."
+    sudo -u postgres -s psql -d $db_name  -f data/refresh_materialized_view.sql &>> $LOG_DIR/installdb/install_db.log
 
     # Vaccum database
     echo "Vaccum database ... (cette opération peut être longue)"

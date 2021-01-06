@@ -7,7 +7,7 @@ SET standard_conforming_strings = on;
 SET check_function_bodies = false;
 SET client_min_messages = warning;
 
-SET search_path = taxonomie, pg_catalog;
+SET search_path = taxonomie, pg_catalog, public;
 
 -- Insertion du thème regroupant les attributs utilisés par GeoNature-atlas
 INSERT INTO bib_themes (nom_theme, desc_theme, ordre, id_droit) 

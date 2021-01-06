@@ -1,10 +1,12 @@
 # coding: utf8
 from flask import Flask
 from flask_cors import CORS
+from flask_migrate import Migrate
 
 from apptax.database import db
 
 db = db
+migrate = Migrate()
 
 app_globals = {}
 
@@ -20,6 +22,7 @@ def init_app():
         db.init_app(app)
         db.app = app
         app.config['DB'] = db
+        migrate.init_app(app, db, directory='apptax/migrations')
 
         @app.teardown_request
         def _manage_transaction(exception):
